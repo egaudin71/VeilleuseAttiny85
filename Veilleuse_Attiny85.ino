@@ -1,63 +1,96 @@
-/* Attiny85 led pour veilleuse
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <avr/sleep.h>
+#include <util/delay.h>
 
-*/
-/*
-  int Rouge = 0; // pin 5
-  int Vert = 1;//pin 6
-  int Bleu = 2;// pin 7
-*/
+#define INTERRUPT_PIN0 PCINT4
+#define LED_0 PB2
+#define LED_1 PB3
+#define BUTTON PB4
+#define debounce 20
+#define adc_disable() (ADCSRA &= ~(1<<ADEN)) // disable ADC (before power-off)
 
+//----------------------- graphique et page
+volatile byte page = 1;
+volatile byte sleeping = 0;
+const unsigned long Alarm = 30000; // alarm time - 15 minutes
+unsigned long StartTime = 0;        // start time
 
-#define ROUGE 2 // pin 7 NUMERIC
-#define VERT 1//pin 6 PWM
-#define BLEU 0// pin 5 PWM
-#define BRUIT 3 // pin 2
-#define BRUIT_LEVEL 2 // pin3
-#define timedealy 50
+//================================================
+void setup()
+//================================================
+{
 
-int x = 0;
-int xmax = 128;
-int increment = 2;
-int valbruit = 0;
-int valseuil = 0;
-int SeuilBruit = 400;
+  DDRB |= (1 << LED_0) | (1 << LED_1);// configured in output
+  PORTB |= (1 << LED_0) | (1 << LED_1);
 
+  DDRB &= ~(1 << BUTTON);//configured in input
+  PORTB |= (1 << BUTTON);// pullup
 
-void setup() {
+  ADCSRB &= ~(1 << ACME); // select AIN1 as neative ref
+  DIDR0 |= (1 << AIN1D) | (1 << AIN0D);
 
-  pinMode(ROUGE, OUTPUT);
-  pinMode(VERT, OUTPUT);
-  pinMode(BLEU, OUTPUT);
+  adc_disable();// for low power reduction
+  initInterupt();
+  set_sleep_mode(SLEEP_MODE_PWR_DOWN);
 
 }
 
-void loop() {
+//================================================
+void initInterupt()
+//================================================
+{
+  cli();
+  GIMSK |= (1 << PCIE);
+  PCMSK |= (1 << INTERRUPT_PIN0);
+  sei();
+}
 
-  valseuil = analogRead(BRUIT_LEVEL);
-  valbruit = analogRead(BRUIT);
-  if (valbruit > valseuil) {
+//================================================
+void enterSleep()
+//================================================
+{
+  sleeping = 1;
+  sleep_enable();
+  sleep_cpu();
+}
 
-    for (x = 0 ; x < xmax; x += increment) {
-      digitalWrite(ROUGE, HIGH);
-      analogWrite(BLEU, x);
-      delay(timedealy);
-      analogWrite(VERT, x);
-      //digitalWrite(ROUGE, HIGH);
-      delay(timedealy);
+//================================================
+ISR(PCINT0_vect)
+//================================================
+{
+  byte buttonNow = PINB & (1 << BUTTON);// 1 si relache et 0 si appuie
+
+  cli();
+  _delay_ms(debounce);// for debounce
+
+  if (sleeping == 0) {// not cause by wake up
+    if (!(PINB & (1 << BUTTON))) { // 1 si relache et 0 si appuie
+      page = (page == 0) ? 1 : 0;
     }
-    for (x = xmax ; x > 0; x -= increment) {
-      digitalWrite(ROUGE, HIGH);
-      analogWrite(BLEU, x);
-      delay(timedealy);
-      analogWrite(VERT, x);
-      //digitalWrite(ROUGE, HIGH);
-      delay(timedealy);
-    }
+  }
+  sei();
+  (!buttonNow) ? PORTB |= (1 << LED_0) : PORTB &= ~ (1 << LED_0);
+}
+
+
+//================================================
+void loop()
+//================================================
+{
+
+  //  if ((millis() - StartTime) > Alarm) {
+  //enterSleep();
+  sleeping = 0;
+  StartTime = millis();
+  if ((ACSR & (1 << ACO)) == 0) {
+    PORTB |= (1 << LED_1);
   }
   else {
-    digitalWrite(ROUGE, LOW);
-    analogWrite(BLEU, 0);
-    analogWrite(VERT, 0);
+    PORTB &= ~ (1 << LED_1);
   }
-
+  //}
 }
+
+
+
